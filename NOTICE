@@ -56,3 +56,7 @@ under the GPL directory that has the GPL license files.
 Consistent with the inbound=outbound model, contributions to any module must be
 made available, by the contributor, under the applicable license(s). Please read
 the Legal section of the CONTRIBUTING.md guide.
+
+MediaTek MIPS16e2 and DSP/MT extensions derived from FirmWire/ghidra.
+Original contributors include Tobias Scharnowski and Daniel Klischies.
+jayMT_Analyzer packaging, analysis optimizations and documented corrections by jay.

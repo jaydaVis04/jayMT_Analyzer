@@ -21,6 +21,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(command[command.index("-max-cpu") + 1], "24")
             self.assertIn(str(root / "symbols with spaces.csv"), command)
             self.assertIn("-noanalysis", command)
+            self.assertEqual(command[command.index("-postScript") + 1], "JayMTAnalyze.java")
             self.assertNotIn("--no-bruteforce", command)
             self.assertFalse(any("ParallelGCThreads=" in part for part in command))
 
@@ -34,7 +35,7 @@ class CliTests(unittest.TestCase):
             root = Path(temporary)
             runtime = root / "ghidra"
             (runtime / "Ghidra").mkdir(parents=True)
-            (runtime / "Ghidra/application.properties").touch()
+            (runtime / "Ghidra/application.properties").write_text("application.version=11.4.2\n")
             (runtime / "support").mkdir()
             (runtime / "support" / ("launch.bat" if cli.os.name == "nt" else "launch.sh")).touch()
             prepared = root / "prepared"
@@ -50,7 +51,9 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "Ghidra").mkdir()
-            (root / "Ghidra/application.properties").touch()
+            (root / "Ghidra/application.properties").write_text("application.version=11.4.2\n")
+            (root / "support").mkdir()
+            (root / "support" / ("launch.bat" if cli.os.name == "nt" else "launch.sh")).touch()
             (root / "projects").mkdir()
             (root / "projects/md1.gpr").write_text("keep")
             args = cli.parser().parse_args(["analyze", str(root), "--ghidra", str(root), "--workspace", str(root)])
@@ -59,6 +62,16 @@ class CliTests(unittest.TestCase):
                     cli.run_analysis(args)
                 run.assert_not_called()
             self.assertEqual((root / "projects/md1.gpr").read_text(), "keep")
+
+    def test_invalid_java_home_does_not_extract_or_create_workspace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = cli.parser().parse_args(["analyze", str(root / "input.img"), "--java-home", str(root / "missing")])
+            with mock.patch.object(cli, "ghidra_path", return_value=root), mock.patch.object(cli, "extract_image") as extract:
+                with self.assertRaisesRegex(ValueError, "bin/java"):
+                    cli.run_analysis(args)
+                extract.assert_not_called()
+            self.assertEqual(list(root.iterdir()), [])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import threading
 import time
 
 from . import __version__
@@ -39,17 +40,38 @@ def ghidra_path(value):
     if not value:
         raise ValueError("set --ghidra or GHIDRA_INSTALL_DIR to an extracted Ghidra installation")
     path = Path(value).expanduser().resolve()
-    if not (path / "Ghidra/application.properties").is_file():
+    properties = path / "Ghidra/application.properties"
+    if not properties.is_file():
         raise ValueError("not a Ghidra installation: {}".format(path))
+    version = re.search(r"(?m)^application.version=(\d+)\.(\d+)(?:\.(\d+))?", properties.read_text(encoding="utf-8"))
+    if version is None or tuple(int(part or 0) for part in version.groups()) < (11, 4, 2):
+        raise ValueError("Ghidra 11.4.2 or later is required; the compact extension replaces the legacy fork")
+    launcher_path(path)
     return path
+
+
+def launcher_path(ghidra):
+    launch = ghidra / "support" / ("launch.bat" if os.name == "nt" else "launch.sh")
+    if not launch.is_file():
+        raise ValueError("Ghidra launcher is missing: {}".format(launch))
+    return launch
+
+
+def java_environment(java_home_option):
+    environment = os.environ.copy()
+    if java_home_option:
+        java_home = Path(java_home_option).expanduser().resolve()
+        if not (java_home / "bin" / ("java.exe" if os.name == "nt" else "java")).is_file():
+            raise ValueError("--java-home does not contain bin/java")
+        environment["JAVA_HOME"] = str(java_home)
+        environment["PATH"] = str(java_home / "bin") + os.pathsep + environment.get("PATH", "")
+    return environment
 
 
 def headless_command(ghidra, project_dir, project, rom, csv, report, logs,
                      threads, heap, no_bruteforce=False, verbose=False):
     """Use the supported launcher without analyzeHeadless's hardcoded 2 GB/2 GC threads."""
-    launch = ghidra / "support" / ("launch.bat" if os.name == "nt" else "launch.sh")
-    if not launch.is_file():
-        raise ValueError("Ghidra launcher is missing: {}".format(launch))
+    launch = launcher_path(ghidra)
     vmargs = "-Dcpu.core.override={} -Djava.awt.headless=true".format(threads)
     command = [str(launch), "fg", "jdk", "jayMT_Analyzer", heap, vmargs,
                "ghidra.app.util.headless.AnalyzeHeadless", str(project_dir), project,
@@ -58,7 +80,7 @@ def headless_command(ghidra, project_dir, project, rom, csv, report, logs,
                "-scriptPath", str(ROOT / "ghidra_scripts"),
                "-log", str(logs / "ghidra.log"),
                "-scriptlog", str(logs / "script.log"),
-               "-postScript", "analyze_mtk_image.py", str(csv), str(report)]
+               "-postScript", "JayMTAnalyze.java", str(csv), str(report)]
     if no_bruteforce:
         command.append("--no-bruteforce")
     if verbose:
@@ -69,6 +91,7 @@ def headless_command(ghidra, project_dir, project, rom, csv, report, logs,
 def run_analysis(args):
     started = time.perf_counter()
     runtime = ghidra_path(args.ghidra)
+    environment = java_environment(args.java_home)
     image = Path(args.image).expanduser().resolve()
     if not image.exists():
         raise ValueError("input does not exist: {}".format(image))
@@ -84,27 +107,36 @@ def run_analysis(args):
     rom, csv = prepared / "md1rom", prepared / "md1_dbginfo.csv"
     if not rom.is_file() or not csv.is_file():
         raise ValueError("analysis needs md1rom and md1_dbginfo.csv; extraction alone supports images without debug symbols")
-    for path in (project_dir, workspace / "logs"):
+    logs = workspace / "logs" / args.project
+    for path in (project_dir, logs):
         path.mkdir(parents=True, exist_ok=True)
     # Exclusive report name prevents an earlier successful run masking a failed script.
     report = workspace / ("analysis-{}-{}.json".format(time.time_ns(), os.getpid()))
     command = headless_command(runtime, project_dir, args.project, rom, csv, report,
-                               workspace / "logs", args.threads, args.heap,
+                               logs, args.threads, args.heap,
                                args.no_bruteforce, args.verbose)
-    environment = os.environ.copy()
-    if args.java_home:
-        java_home = Path(args.java_home).expanduser().resolve()
-        if not (java_home / "bin" / ("java.exe" if os.name == "nt" else "java")).is_file():
-            raise ValueError("--java-home does not contain bin/java")
-        environment["JAVA_HOME"] = str(java_home)
-        environment["PATH"] = str(java_home / "bin") + os.pathsep + environment.get("PATH", "")
     say("MIPS/MIPS16e analysis | {} workers | {} heap | {}".format(args.threads, args.heap, args.project))
     say("Ghidra reports stage progress below; individual database edits remain serial.")
     (workspace / "invocation.json").write_text(json.dumps({
         "tool_version": __version__, "command": command,
         "threads": args.threads, "heap": args.heap,
     }, indent=2) + "\n", encoding="utf-8")
-    result = subprocess.run(command, env=environment, check=False)
+    # Some native analyzers emit nothing for minutes; keep elapsed time visible.
+    finished = threading.Event()
+
+    def heartbeat():
+        while not finished.wait(30):
+            elapsed = int(time.perf_counter() - started)
+            say("Ghidra process running | elapsed {:02d}:{:02d} | logs: {}".format(
+                elapsed // 60, elapsed % 60, workspace / "logs"))
+
+    ticker = threading.Thread(target=heartbeat, daemon=True)
+    ticker.start()
+    try:
+        result = subprocess.run(command, env=environment, check=False)
+    finally:
+        finished.set()
+        ticker.join()
     if result.returncode:
         raise ValueError("Ghidra exited with code {}; see {}".format(result.returncode, workspace / "logs"))
     if not report.is_file():
@@ -114,6 +146,9 @@ def run_analysis(args):
         raise ValueError("analysis did not complete: {}; see {}".format(summary.get("status"), report))
     if not (project_dir / (args.project + ".gpr")).is_file():
         raise ValueError("analysis finished but the Ghidra project was not saved; see logs")
+    log_file = logs / "ghidra.log"
+    if not log_file.is_file() or "REPORT: Save succeeded for: /md1rom" not in log_file.read_text(encoding="utf-8", errors="replace"):
+        raise ValueError("analysis finished but Ghidra did not confirm saving md1rom; see {}".format(logs))
     say("{} in {:.1f}s. Report: {}".format(summary["status"], time.perf_counter() - started, report))
     say("Open project: {}".format(project_dir / (args.project + ".gpr")))
     return 0

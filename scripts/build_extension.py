@@ -92,6 +92,12 @@ def build(ghidra: Path, output: Path, install: bool = False) -> Path:
     with tempfile.TemporaryDirectory(prefix="jaymt-build-") as temporary:
         stage = Path(temporary) / NAME
         shutil.copytree(ROOT / "extension", stage)
+        # Keep one canonical copy in source control while retaining licensing and
+        # the complete usage guide in every separately distributed extension.
+        for filename in ("LICENSE", "NOTICE", "README.md"):
+            shutil.copyfile(ROOT / filename, stage / filename)
+        if (ROOT / "assets").is_dir():
+            shutil.copytree(ROOT / "assets", stage / "assets")
         langs = stage / "data" / "languages"
         print("[jayMT] Compiling MediaTek MIPS32/MIPS16e2 language", flush=True)
         subprocess.run([java, "-Djava.awt.headless=true", "-cp", classpath,
@@ -101,7 +107,8 @@ def build(ghidra: Path, output: Path, install: bool = False) -> Path:
         classes.mkdir()
         print("[jayMT] Compiling instruction analyzer", flush=True)
         sources = sorted((stage / "src").glob("**/*.java"))
-        subprocess.run([javac, "-encoding", "UTF-8", "-cp", classpath,
+        release = props.get("application.java.compiler", props.get("application.java.min", "21"))
+        subprocess.run([javac, "--release", release, "-proc:none", "-encoding", "UTF-8", "-cp", classpath,
                         "-d", str(classes), *map(str, sources)], check=True)
         lib = stage / "lib"
         lib.mkdir(exist_ok=True)
@@ -118,7 +125,7 @@ def build(ghidra: Path, output: Path, install: bool = False) -> Path:
         scripts = ROOT / "ghidra_scripts"
         if scripts.exists():
             shutil.copytree(scripts, stage / "ghidra_scripts",
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.class", ".DS_Store"))
         hashes = {p.relative_to(stage).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                   for p in sorted(stage.rglob("*")) if p.is_file()}
         (stage / "jaymt-build.json").write_text(json.dumps({"name": NAME,

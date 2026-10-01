@@ -1,0 +1,112 @@
+name: Ghidra processor and workflow tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'extension/**'
+      - 'ghidra_scripts/**'
+      - 'jaymt/**'
+      - 'scripts/**'
+      - 'tests/ghidra/**'
+      - '.github/workflows/ghidra.yml'
+  pull_request:
+    paths:
+      - 'extension/**'
+      - 'ghidra_scripts/**'
+      - 'jaymt/**'
+      - 'scripts/**'
+      - 'tests/ghidra/**'
+      - '.github/workflows/ghidra.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ghidra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GHIDRA_INSTALL_DIR: ${{ runner.temp }}/ghidra/ghidra_11.4.2_PUBLIC
+      GHIDRA_ARCHIVE: ghidra_11.4.2_PUBLIC_20250826.zip
+      GHIDRA_SHA256: 795a02076af16257bd6f3f4736c4fc152ce9ff1f95df35cd47e2adc086e037a6
+      TEST_ROOT: ${{ runner.temp }}/jaymt-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Cache the pinned Ghidra download
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ghidra-download
+          key: ghidra-11.4.2-795a02076af16257bd6f3f4736c4fc152ce9ff1f95df35cd47e2adc086e037a6
+      - name: Download and verify official Ghidra
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/ghidra-download" "$RUNNER_TEMP/ghidra" "$TEST_ROOT/logs"
+          archive="$RUNNER_TEMP/ghidra-download/$GHIDRA_ARCHIVE"
+          if [ ! -f "$archive" ]; then
+            curl --fail --location --retry 3 \
+              "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4.2_build/$GHIDRA_ARCHIVE" \
+              --output "$archive"
+          fi
+          printf '%s  %s\n' "$GHIDRA_SHA256" "$archive" | sha256sum --check --strict
+          unzip -q "$archive" -d "$RUNNER_TEMP/ghidra"
+      - name: Build and install the processor extension
+        run: python -m jaymt setup --ghidra "$GHIDRA_INSTALL_DIR" --java-home "$JAVA_HOME"
+      - name: Generate a synthetic mixed-MIPS fixture
+        run: python scripts/make_smoke_fixture.py "$TEST_ROOT/fixture"
+      - name: Check compiled instruction decoding and p-code
+        shell: bash
+        run: |
+          mkdir -p "$TEST_ROOT/processor-project"
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" "$TEST_ROOT/processor-project" processor \
+            -import "$TEST_ROOT/fixture/md1rom" -processor MIPS:LE:32:jaymt -noanalysis \
+            -scriptPath "$GITHUB_WORKSPACE/tests/ghidra" -postScript JayMTProcessorTest.java \
+            -deleteProject -log "$TEST_ROOT/logs/processor.log" 2>&1 | tee "$TEST_ROOT/logs/processor-console.log"
+          grep -q JAYMT_PROCESSOR_TEST_PASS "$TEST_ROOT/logs/processor-console.log"
+      - name: Run the complete CLI analysis pipeline
+        run: |
+          python -m jaymt analyze "$TEST_ROOT/fixture" --ghidra "$GHIDRA_INSTALL_DIR" \
+            --java-home "$JAVA_HOME" --workspace "$TEST_ROOT/workflow" --project smoke \
+            --threads 2 --heap 2G
+      - name: Verify the saved project
+        shell: bash
+        run: |
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" "$TEST_ROOT/workflow/projects" smoke \
+            -process md1rom -readOnly -noanalysis \
+            -scriptPath "$GITHUB_WORKSPACE/tests/ghidra;$GITHUB_WORKSPACE/ghidra_scripts" \
+            -postScript JayMTAnalysisTest.java -postScript JayMTModeProbeTest.java \
+            -log "$TEST_ROOT/logs/workflow-verifier.log" \
+            2>&1 | tee "$TEST_ROOT/logs/workflow-verifier-console.log"
+          grep -q JAYMT_ANALYSIS_TEST_PASS "$TEST_ROOT/logs/workflow-verifier-console.log"
+          grep -q JAYMT_MODE_PROBE_TEST_PASS "$TEST_ROOT/logs/workflow-verifier-console.log"
+      - name: Reanalyze existing functions and verify saved state
+        shell: bash
+        run: |
+          "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" "$TEST_ROOT/workflow/projects" smoke \
+            -process md1rom -noanalysis \
+            -scriptPath "$GITHUB_WORKSPACE/ghidra_scripts;$GITHUB_WORKSPACE/tests/ghidra" \
+            -postScript JayMTAnalyze.java "$TEST_ROOT/fixture/md1_dbginfo.csv" "$TEST_ROOT/reanalysis.json" \
+            -postScript JayMTAnalysisTest.java -log "$TEST_ROOT/logs/reanalysis.log" \
+            2>&1 | tee "$TEST_ROOT/logs/reanalysis-console.log"
+          grep -q JAYMT_ANALYSIS_TEST_PASS "$TEST_ROOT/logs/reanalysis-console.log"
+          python -c 'import json, os; from pathlib import Path; r = json.loads((Path(os.environ["TEST_ROOT"]) / "reanalysis.json").read_text()); assert r["status"] in ("completed", "completed_with_warnings"), r'
+      - name: Retain the extension and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jayMT-ghidra-11.4.2-validation
+          retention-days: 14
+          path: |
+            dist/*.zip
+            ${{ runner.temp }}/jaymt-tests/logs/
+            ${{ runner.temp }}/jaymt-tests/workflow/logs/
+            ${{ runner.temp }}/jaymt-tests/workflow/analysis-*.json
+            ${{ runner.temp }}/jaymt-tests/workflow/invocation.json
+            ${{ runner.temp }}/jaymt-tests/reanalysis.json

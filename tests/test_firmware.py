@@ -328,6 +328,17 @@ class FirmwareTests(unittest.TestCase):
         self.assertEqual((self.output / "md1_dbginfo.csv").read_bytes(),
                          (archived_output / "md1_dbginfo.csv").read_bytes())
 
+    @unittest.skipUnless(importlib.util.find_spec("lz4"), "optional lz4 package is not installed")
+    def test_truncated_lz4_never_publishes_partial_output(self):
+        import lz4.frame
+        compressed = lz4.frame.compress(image_data())
+        for removed in (1, 4, 8, 15, len(compressed) - 4):
+            with self.subTest(removed=removed):
+                self.image.write_bytes(compressed[:-removed])
+                with self.assertRaises(FirmwareError):
+                    extract_image(self.image, self.output)
+                self.assertFalse(self.output.exists())
+
     def test_cli_compatibility_wrapper_accepts_md1img(self):
         root = Path(__file__).resolve().parents[1]
         self.write_image()
