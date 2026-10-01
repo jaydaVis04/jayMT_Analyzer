@@ -26,16 +26,27 @@ jobs:
   ghidra:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '11.4.2'
+            archive: ghidra_11.4.2_PUBLIC_20250826.zip
+            sha256: 795a02076af16257bd6f3f4736c4fc152ce9ff1f95df35cd47e2adc086e037a6
+          - version: '12.1.4'
+            archive: ghidra_12.1.4_PUBLIC_20260921.zip
+            sha256: ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db
     env:
-      GHIDRA_ARCHIVE: ghidra_11.4.2_PUBLIC_20250826.zip
-      GHIDRA_SHA256: 795a02076af16257bd6f3f4736c4fc152ce9ff1f95df35cd47e2adc086e037a6
+      GHIDRA_VERSION: ${{ matrix.version }}
+      GHIDRA_ARCHIVE: ${{ matrix.archive }}
+      GHIDRA_SHA256: ${{ matrix.sha256 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set validation paths on the runner
         shell: bash
         run: |
-          printf 'GHIDRA_INSTALL_DIR=%s/ghidra/ghidra_11.4.2_PUBLIC\nTEST_ROOT=%s/jaymt-tests\n' \
-            "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'GHIDRA_INSTALL_DIR=%s/ghidra/ghidra_%s_PUBLIC\nTEST_ROOT=%s/jaymt-tests\n' \
+            "$RUNNER_TEMP" "$GHIDRA_VERSION" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -47,7 +58,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/ghidra-download
-          key: ghidra-11.4.2-795a02076af16257bd6f3f4736c4fc152ce9ff1f95df35cd47e2adc086e037a6
+          key: ghidra-${{ matrix.version }}-${{ matrix.sha256 }}
       - name: Download and verify official Ghidra
         shell: bash
         run: |
@@ -55,7 +66,7 @@ jobs:
           archive="$RUNNER_TEMP/ghidra-download/$GHIDRA_ARCHIVE"
           if [ ! -f "$archive" ]; then
             curl --fail --location --retry 3 \
-              "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.4.2_build/$GHIDRA_ARCHIVE" \
+              "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/$GHIDRA_ARCHIVE" \
               --output "$archive"
           fi
           printf '%s  %s\n' "$GHIDRA_SHA256" "$archive" | sha256sum --check --strict
@@ -77,7 +88,7 @@ jobs:
         run: |
           python -m jaymt analyze "$TEST_ROOT/fixture" --ghidra "$GHIDRA_INSTALL_DIR" \
             --java-home "$JAVA_HOME" --workspace "$TEST_ROOT/workflow" --project smoke \
-            --threads 2 --heap 2G
+            --threads 2 --stack-threads 2 --heap 2G
       - name: Verify the saved project
         shell: bash
         run: |
@@ -104,7 +115,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: jayMT-ghidra-11.4.2-validation
+          name: jayMT-ghidra-${{ matrix.version }}-validation
           retention-days: 14
           path: |
             dist/*.zip

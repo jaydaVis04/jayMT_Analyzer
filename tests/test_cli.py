@@ -26,9 +26,18 @@ class CliTests(unittest.TestCase):
             self.assertFalse(any("ParallelGCThreads=" in part for part in command))
 
     def test_invalid_resource_flags_fail_early(self):
-        for arguments in (("--threads", "0"), ("--threads", "-2"), ("--heap", "0G"), ("--heap", "8G -Xbad")):
+        for arguments in (("--threads", "0"), ("--threads", "-2"), ("--stack-threads", "0"), ("--heap", "0G"), ("--heap", "8G -Xbad")):
             with self.subTest(arguments=arguments), mock.patch("sys.stderr"), self.assertRaises(SystemExit):
                 cli.parser().parse_args(["analyze", "input", *arguments])
+
+    def test_stack_workers_cannot_exceed_global_worker_limit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "support").mkdir()
+            (root / "support" / ("launch.bat" if cli.os.name == "nt" else "launch.sh")).touch()
+            command = cli.headless_command(root, root, "md1", root / "md1rom", root / "symbols.csv",
+                                           root / "report.json", root, 4, "4G", stack_threads=12)
+            self.assertEqual(command[-1], "--stack-threads=4")
 
     def test_headless_zero_exit_without_report_is_failure(self):
         with tempfile.TemporaryDirectory() as temporary:

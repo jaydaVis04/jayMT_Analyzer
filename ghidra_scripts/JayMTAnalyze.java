@@ -43,9 +43,12 @@ public class JayMTAnalyze extends GhidraScript {
     private boolean verbose;
     private boolean noBruteforce;
     private boolean allowStock;
+    private Integer stackThreads;
     private int maxEmulationSteps = 1_000_000;
     private long pointersCreated;
     private long pointerCount;
+    private long aliasLabelsCreated;
+    private long unresolvedLabelsCreated;
     private final Map<Long, Boolean> hints = new HashMap<>();
     private final Map<Long, Boolean> modeCache = new HashMap<>();
     private final Set<Long> modeConflicts = new HashSet<>();
@@ -106,6 +109,7 @@ public class JayMTAnalyze extends GhidraScript {
     protected void run() throws Exception {
         long start = System.nanoTime();
         report.putAll(record("tool", "jayMT_Analyzer", "engine", "Java", "status", "failed",
+            "ghidra_version", ghidra.framework.Application.getApplicationVersion(),
             "warnings", warnings, "stages", stages, "unresolved_symbols", unresolved,
             "heuristic_functions", heuristic, "mapping_blocks", mappings));
         try {
@@ -126,6 +130,9 @@ public class JayMTAnalyze extends GhidraScript {
             report.put("elapsed_seconds", seconds(start));
             report.put("pointer_count", pointerCount);
             report.put("pointers_created", pointersCreated);
+            report.put("named_function_count", importedFunctions.size());
+            report.put("alias_labels_created", aliasLabelsCreated);
+            report.put("unresolved_labels_created", unresolvedLabelsCreated);
             if (reportPath != null) {
                 try (Writer writer = Files.newBufferedWriter(reportPath, StandardCharsets.UTF_8)) {
                     new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(report, writer);
@@ -142,6 +149,10 @@ public class JayMTAnalyze extends GhidraScript {
             if (argument.equals("--verbose")) verbose = true;
             else if (argument.equals("--no-bruteforce")) noBruteforce = true;
             else if (argument.equals("--allow-stock-language")) allowStock = true;
+            else if (argument.startsWith("--stack-threads=")) {
+                stackThreads = Integer.parseInt(argument.substring(argument.indexOf('=') + 1));
+                if (stackThreads <= 0) throw new IllegalArgumentException("stack worker count must be positive");
+            }
             else if (argument.startsWith("--max-emulation-steps=")) {
                 maxEmulationSteps = Integer.parseInt(argument.substring(argument.indexOf('=') + 1));
                 if (maxEmulationSteps <= 0) throw new IllegalArgumentException("emulation step limit must be positive");
@@ -209,6 +220,13 @@ public class JayMTAnalyze extends GhidraScript {
             setAnalysisOption(currentProgram, "MIPS UnAlligned Instruction Fix", "false");
             setAnalysisOption(currentProgram, "jayMT MIPS Instruction Fix", "true");
         }
+        Map<String, String> options = getCurrentAnalysisOptionsAndValues(currentProgram);
+        String stackOption = "Stack.Max Threads";
+        if (stackThreads != null) {
+            if (!options.containsKey(stackOption)) throw new IllegalArgumentException("this Ghidra runtime does not expose " + stackOption);
+            setAnalysisOption(currentProgram, stackOption, stackThreads.toString());
+        }
+        report.put("stack_threads", stackThreads == null ? options.get(stackOption) : stackThreads.toString());
     }
 
     private void analyzeImage() throws Exception {
@@ -403,12 +421,13 @@ public class JayMTAnalyze extends GhidraScript {
         report.put("mode_seeds", seeded);
     }
 
-    private void alias(long start, String name) throws Exception {
+    private boolean label(long start, String name) throws Exception {
         Address address = toAddr(start);
         for (ghidra.program.model.symbol.Symbol symbol : currentProgram.getSymbolTable().getSymbols(address)) {
-            if (symbol.getName().equals(name)) return;
+            if (symbol.getName().equals(name)) return false;
         }
         currentProgram.getSymbolTable().createLabel(address, name, SourceType.IMPORTED);
+        return true;
     }
 
     private boolean function(Symbol symbol) throws Exception {
@@ -417,7 +436,7 @@ public class JayMTAnalyze extends GhidraScript {
         if (existing != null) {
             SourceType source = existing.getSymbol().getSource();
             if (!importedFunctions.contains(symbol.start) && (source == SourceType.DEFAULT || source == SourceType.ANALYSIS)) existing.setName(name, SourceType.IMPORTED);
-            else if (!existing.getName().equals(name)) alias(symbol.start, name);
+            else if (!existing.getName().equals(name) && label(symbol.start, name)) aliasLabelsCreated++;
             importedFunctions.add(symbol.start);
             return true;
         }
@@ -527,7 +546,7 @@ public class JayMTAnalyze extends GhidraScript {
             info(String.format(Locale.ROOT, "Stage %d: %d resolved, %d pending in %.2fs", stage + 1, before - remaining.size(), remaining.size(), elapsed));
         }
         for (Symbol symbol : remaining) {
-            createLabel(toAddr(symbol.start), SymbolUtilities.replaceInvalidChars(symbol.name, true), false);
+            if (label(symbol.start, SymbolUtilities.replaceInvalidChars(symbol.name, true))) unresolvedLabelsCreated++;
             unresolved.add(record("name", symbol.name, "address", symbol.start, "reason", "no confident function; label retained"));
         }
     }

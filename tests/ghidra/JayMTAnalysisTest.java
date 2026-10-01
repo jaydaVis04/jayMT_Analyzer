@@ -165,6 +165,9 @@ public class JayMTAnalysisTest extends GhidraScript {
         if (function == null || !function.getName().equals(name)) {
             throw new AssertionError("Expected " + name + " at " + address + ", got " + function);
         }
+        if (function.getSymbol().getSource() != SourceType.IMPORTED) {
+            throw new AssertionError("Debug function name must be recorded as imported at " + address);
+        }
     }
 
     @Override
@@ -188,7 +191,7 @@ public class JayMTAnalysisTest extends GhidraScript {
         function(0x90000100L, "INT_InitPerCoreRegion_C");
         boolean aliasFound = false;
         for (Symbol symbol : currentProgram.getSymbolTable().getSymbols(toAddr(0x90000000L))) {
-            aliasFound |= symbol.getName().equals("return_alias");
+            aliasFound |= symbol.getName().equals("return_alias") && symbol.getSource() == SourceType.IMPORTED;
         }
         if (!aliasFound) {
             throw new AssertionError("CSV function alias was discarded");

@@ -69,7 +69,7 @@ def java_environment(java_home_option):
 
 
 def headless_command(ghidra, project_dir, project, rom, csv, report, logs,
-                     threads, heap, no_bruteforce=False, verbose=False):
+                     threads, heap, no_bruteforce=False, verbose=False, stack_threads=None):
     """Use the supported launcher without analyzeHeadless's hardcoded 2 GB/2 GC threads."""
     launch = launcher_path(ghidra)
     vmargs = "-Dcpu.core.override={} -Djava.awt.headless=true".format(threads)
@@ -85,6 +85,8 @@ def headless_command(ghidra, project_dir, project, rom, csv, report, logs,
         command.append("--no-bruteforce")
     if verbose:
         command.append("--verbose")
+    if stack_threads is not None:
+        command.append("--stack-threads=" + str(min(stack_threads, threads)))
     return command
 
 
@@ -114,12 +116,13 @@ def run_analysis(args):
     report = workspace / ("analysis-{}-{}.json".format(time.time_ns(), os.getpid()))
     command = headless_command(runtime, project_dir, args.project, rom, csv, report,
                                logs, args.threads, args.heap,
-                               args.no_bruteforce, args.verbose)
+                               args.no_bruteforce, args.verbose, args.stack_threads)
     say("MIPS/MIPS16e analysis | {} workers | {} heap | {}".format(args.threads, args.heap, args.project))
     say("Ghidra reports stage progress below; individual database edits remain serial.")
     (workspace / "invocation.json").write_text(json.dumps({
         "tool_version": __version__, "command": command,
         "threads": args.threads, "heap": args.heap,
+        "stack_threads": None if args.stack_threads is None else min(args.stack_threads, args.threads),
     }, indent=2) + "\n", encoding="utf-8")
     # Some native analyzers emit nothing for minutes; keep elapsed time visible.
     finished = threading.Event()
@@ -172,6 +175,7 @@ def parser():
     run.add_argument("--workspace", help="output directory; default: <input stem>_jaymt")
     run.add_argument("--project", default="md1", help="Ghidra project name (must be new)")
     run.add_argument("--threads", type=positive, default=getattr(os, "process_cpu_count", os.cpu_count)() or 1)
+    run.add_argument("--stack-threads", type=positive, help="override Ghidra's separate Stack analyzer worker limit (capped by --threads)")
     run.add_argument("--heap", type=heap_size, default="4G", help="Java heap cap; default 4G, increase if RAM permits")
     run.add_argument("--no-bruteforce", action="store_true", help="skip uncertain final mode guesses (less coverage)")
     run.add_argument("--verbose", action="store_true")
