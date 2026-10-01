@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/FirmWire/ghidra",
+  "revision": "61a1b439af5f6d5ba7e92809c05145dbe44e5d97",
+  "nsa_baseline": "3e245c6f80b1fe6465a8d5f73c09bcd1fd823fb1",
+  "original_sha256": {
+    "mips32le.slaspec": "7129f30f0445a4d8df1cf00e82413616fc1f6ff6a12f358d4b8380ff4145460b",
+    "mips.sinc": "c0822d121bdc73ac0ef79227786ddf62bc6bea651dc623b54f9862adc3c9d983",
+    "mips32Instructions.sinc": "cc9c15dd0ba9cef5362a31d3e68504d28d1e07ed851bd836044fb1df3efc8cdc",
+    "mips16.sinc": "7bcff38723c26c989afb6c5c3d77747dde39394d36149ff14c657a5c2f70bba1",
+    "mipsmicro.sinc": "ac8ef82f95bf04eedcff27e744db1cd5ba9081b3897b0d93712d6cc109f3ad5f",
+    "mipsfloat.sinc": "216eda3d793b7a354030ba236e85f0f2198d1ff44905ada04a1025ab58a7906f",
+    "mips32.pspec": "af053f7c02029e95a71e9ca83516919c4c8e2b1758986cda1e24940ec78426a9",
+    "mips32le.cspec": "c1af318892bad95d20ee88d7022db998a23394d2cd22d5195d216091bc057cdc",
+    "MipsPreAnalyzer.java": "b08818e47524d2151c4893bac0a3cdad597de6e48f5589b4fc1207f182a6c73b"
+  }
+}

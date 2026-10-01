@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language_definitions>
+  <language processor="MIPS" endian="little" size="32" variant="jaymt"
+            version="1.0" slafile="mips32le.sla" processorspec="mips32.pspec"
+            id="MIPS:LE:32:jaymt">
+    <description>jayMT MediaTek MIPS32 + MIPS16e2 (FirmWire ISA)</description>
+    <compiler name="default" spec="mips32le.cspec" id="default"/>
+  </language>
+</language_definitions>

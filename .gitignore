@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.DS_Store
+# Firmware and generated analysis stay local.
+*.img
+*.bin
+*.rom
+*.lz4
+*.tar
+*.tar.md5
+*_extracted/
+workspace/
+*.gpr
+*.rep/
+*.log
+*.sla
+*.class
+*.jar

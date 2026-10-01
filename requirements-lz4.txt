@@ -1,0 +1,2 @@
+# Optional. Raw md1img extraction has no third-party dependencies.
+lz4>=4.3.3,<5

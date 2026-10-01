@@ -1,0 +1,3 @@
+* text=auto
+# Preserve upstream SLEIGH formatting for readable provenance comparisons.
+extension/data/languages/* -whitespace
