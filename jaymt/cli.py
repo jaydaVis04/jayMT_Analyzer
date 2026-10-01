@@ -80,7 +80,7 @@ def headless_command(ghidra, project_dir, project, rom, csv, report, logs,
                "-scriptPath", str(ROOT / "ghidra_scripts"),
                "-log", str(logs / "ghidra.log"),
                "-scriptlog", str(logs / "script.log"),
-               "-postScript", "JayMTAnalyze.java", str(csv), str(report)]
+               "-postScript", str(ROOT / "ghidra_scripts" / "JayMTAnalyze.java"), str(csv), str(report)]
     if no_bruteforce:
         command.append("--no-bruteforce")
     if verbose:

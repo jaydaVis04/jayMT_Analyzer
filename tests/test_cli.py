@@ -21,7 +21,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(command[command.index("-max-cpu") + 1], "24")
             self.assertIn(str(root / "symbols with spaces.csv"), command)
             self.assertIn("-noanalysis", command)
-            self.assertEqual(command[command.index("-postScript") + 1], "JayMTAnalyze.java")
+            self.assertEqual(command[command.index("-postScript") + 1], str(cli.ROOT / "ghidra_scripts/JayMTAnalyze.java"))
             self.assertNotIn("--no-bruteforce", command)
             self.assertFalse(any("ParallelGCThreads=" in part for part in command))
 

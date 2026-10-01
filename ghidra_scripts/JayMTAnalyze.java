@@ -564,7 +564,9 @@ public class JayMTAnalyze extends GhidraScript {
                 }
                 boolean changed = survivors.size() != remaining.size();
                 remaining = survivors;
-                analyzeChanges(currentProgram);
+                // Seed stage is followed by a full analysis of the entire program.
+                // Running pending analysis here would repeat that expensive work.
+                if (stage > 0) analyzeChanges(currentProgram);
                 monitor.checkCancelled();
                 if (!changed) break;
             }
