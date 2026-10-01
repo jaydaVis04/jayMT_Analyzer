@@ -84,3 +84,17 @@ python3 scripts/build_extension.py --ghidra "$GHIDRA_INSTALL_DIR"
 ```
 
 The small Python CLI needs no package installation. See [NOTICE](NOTICE) for upstream attribution and [LICENSE](LICENSE) for Apache 2.0 licensing. Firmware images, extracted proprietary binaries, Ghidra distributions, and analysis databases are not included.
+
+## Improvements over the original FirmWire fork
+
+| Area | Original | jayMT_Analyzer |
+| --- | --- | --- |
+| Repository | Full Ghidra fork; audited checkout ~563 MiB | Compact CLI + processor extension; Ghidra installed separately |
+| Firmware input | CP archive required by the CLI | Direct md1img, with optional CP/LZ4 support |
+| Extraction | Whole-file copies and repeated debug parsing | Streaming copies, one debug parse, validated offsets and hashes |
+| Analysis work | Repeated list searches, mode probes, per-word Java calls | Linear symbol filtering, cached probes, chunked pointer scanning |
+| Resources | Legacy launcher: 2 GB heap and fixed GC/JIT limits | Configurable heap and worker count; JVM-managed GC/JIT |
+| Compatibility & accuracy | Implicit Python runtime; mapping and symbol-parsing bugs | Explicit Jython runtime, corrected mappings/ISA semantics, regression tests |
+| Visibility | Long-running script with noisy per-function output | Green branding, stage progress, elapsed-time updates, JSON results |
+
+Real A41 extraction preserves the ROM and all **99,346 valid symbols**. Full analysis remains the default; no unmeasured speedup multiplier is claimed. [Validation details](docs/VALIDATION.md).
