@@ -27,12 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      GHIDRA_INSTALL_DIR: ${{ runner.temp }}/ghidra/ghidra_11.4.2_PUBLIC
       GHIDRA_ARCHIVE: ghidra_11.4.2_PUBLIC_20250826.zip
       GHIDRA_SHA256: 795a02076af16257bd6f3f4736c4fc152ce9ff1f95df35cd47e2adc086e037a6
-      TEST_ROOT: ${{ runner.temp }}/jaymt-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Set validation paths on the runner
+        shell: bash
+        run: |
+          printf 'GHIDRA_INSTALL_DIR=%s/ghidra/ghidra_11.4.2_PUBLIC\nTEST_ROOT=%s/jaymt-tests\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
