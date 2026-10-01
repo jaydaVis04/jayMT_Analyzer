@@ -415,11 +415,9 @@ public class JayMTAnalyze extends GhidraScript {
         String name = SymbolUtilities.replaceInvalidChars(symbol.name, true);
         Function existing = functions.getFunctionAt(toAddr(symbol.start));
         if (existing != null) {
-            if (!existing.getName().equals(name)) {
-                SourceType source = existing.getSymbol().getSource();
-                if (!importedFunctions.contains(symbol.start) && (source == SourceType.DEFAULT || source == SourceType.ANALYSIS)) existing.setName(name, SourceType.IMPORTED);
-                else alias(symbol.start, name);
-            }
+            SourceType source = existing.getSymbol().getSource();
+            if (!importedFunctions.contains(symbol.start) && (source == SourceType.DEFAULT || source == SourceType.ANALYSIS)) existing.setName(name, SourceType.IMPORTED);
+            else if (!existing.getName().equals(name)) alias(symbol.start, name);
             importedFunctions.add(symbol.start);
             return true;
         }
@@ -427,7 +425,9 @@ public class JayMTAnalyze extends GhidraScript {
         // Debug extents may include literal pools. Preserve Ghidra's flow-derived body.
         Function created = createFunction(toAddr(symbol.start), name);
         if (created != null) {
-            created.getSymbol().setSource(SourceType.IMPORTED);
+            // Auto-detected thunks may inherit a DEFAULT symbol from their target.
+            // setSource cannot cross DEFAULT; assigning the name/source together can.
+            created.setName(name, SourceType.IMPORTED);
             importedFunctions.add(symbol.start);
         }
         return created != null;

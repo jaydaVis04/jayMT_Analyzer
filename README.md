@@ -44,6 +44,8 @@ python3 -m venv .venv
 
 `unpack_md1img.py` is the standalone extractor. The old `unpack_mtk_cp_update.py` filename remains a compatibility entry point and now also accepts md1img directly.
 
+**`md1.bin` is supported too:** inputs are recognized by their container header, not their filename or extension. Use the same `unpack` or `analyze` command. A bare ROM without a container header needs a prepared directory containing that ROM named `md1rom` and its matching `md1_dbginfo.csv`; this tool cannot recreate missing debug symbols.
+
 ## What you get
 
 - `md1rom`: firmware bytes, unchanged.
@@ -120,7 +122,7 @@ Real firmware comes from [FirmWire's public research dataset](https://zenodo.org
 
 ROM SHA-256: `d2fab6ece6d77f8d1666903bcba3f252e05d7315cf5bfca4c29e9164c62a3e8f`.
 
-Validation passed **39 Python tests** with optional LZ4 installed, actual Ghidra processor/p-code tests, and the native Java workflow checks: **7 functions, 3 pointers, 16 mapped blocks, zero unresolved fixture symbols**, and all three discovery stages. Checks cover aliases, quoted names, instruction-mode probing, bounds, memory holes, and saved-project reanalysis. CI builds against an official Ghidra 11.4.2 download verified by SHA-256.
+Validation passed **39 Python tests** with optional LZ4 installed, actual Ghidra processor/p-code tests, and the native Java workflow checks: **8 functions, 3 pointers, 16 mapped blocks, zero unresolved fixture symbols**, and all three discovery stages. Checks cover thunks, aliases, quoted names, instruction-mode probing, bounds, memory holes, and saved-project reanalysis. CI builds against an official Ghidra 11.4.2 download verified by SHA-256.
 
 The full A41 run was started but stopped before completion to deliver this version promptly. Real extraction parity and native fixture results are verified; whole-image completion, coverage, and a speedup ratio are **not yet established**. The Java port removes scripting overhead, but Ghidra's native analysis can still dominate runtime.
 

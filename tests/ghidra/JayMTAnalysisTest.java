@@ -20,6 +20,7 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolUtilities;
+import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.mem.MemoryBlock;
 
 public class JayMTAnalysisTest extends GhidraScript {
@@ -178,6 +179,12 @@ public class JayMTAnalysisTest extends GhidraScript {
         function(0x90000050L, "referenced_test");
         function(0x90000060L, SymbolUtilities.replaceInvalidChars("quoted function", true));
         function(0x90000070L, SymbolUtilities.replaceInvalidChars("quote\"function", true));
+        function(0x90000080L, "thunk_test");
+        Function thunk = currentProgram.getFunctionManager().getFunctionAt(toAddr(0x90000080L));
+        if (!thunk.isThunk() || thunk.getSymbol().getSource() != SourceType.IMPORTED ||
+                !thunk.getThunkedFunction(false).getEntryPoint().equals(toAddr(0x90000000L))) {
+            throw new AssertionError("Thunk must retain its imported local name and target");
+        }
         function(0x90000100L, "INT_InitPerCoreRegion_C");
         boolean aliasFound = false;
         for (Symbol symbol : currentProgram.getSymbolTable().getSymbols(toAddr(0x90000000L))) {
