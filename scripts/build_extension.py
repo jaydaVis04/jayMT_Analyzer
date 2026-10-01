@@ -110,6 +110,11 @@ def build(ghidra: Path, output: Path, install: bool = False) -> Path:
         release = props.get("application.java.compiler", props.get("application.java.min", "21"))
         subprocess.run([javac, "--release", release, "-proc:none", "-encoding", "UTF-8", "-cp", classpath,
                         "-d", str(classes), *map(str, sources)], check=True)
+        print("[jayMT] Checking native analysis script compatibility", flush=True)
+        script_sources = sorted((ROOT / "ghidra_scripts").glob("*.java"))
+        if script_sources:
+            subprocess.run([javac, "--release", release, "-proc:none", "-encoding", "UTF-8", "-cp", classpath,
+                            "-d", str(Path(temporary) / "script-check"), *map(str, script_sources)], check=True)
         lib = stage / "lib"
         lib.mkdir(exist_ok=True)
         with zipfile.ZipFile(lib / "jayMT_Analyzer.jar", "w", zipfile.ZIP_DEFLATED) as jar:

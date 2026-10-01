@@ -13,8 +13,9 @@ import java.util.*;
 import com.google.gson.GsonBuilder;
 import ghidra.app.script.GhidraScript;
 import ghidra.app.cmd.disassemble.MipsDisassembleCommand;
+import ghidra.app.cmd.function.CreateFunctionCmd;
+import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.emulator.EmulatorHelper;
-import ghidra.app.util.PseudoDisassembler;
 import ghidra.app.util.PseudoDisassemblerContext;
 import ghidra.app.util.PseudoInstruction;
 import ghidra.program.model.address.*;
@@ -35,7 +36,6 @@ public class JayMTAnalyze extends GhidraScript {
     private Listing listing;
     private FunctionManager functions;
     private BookmarkManager bookmarks;
-    private PseudoDisassembler pseudo;
     private MemoryBlock mainBlock;
     private long romSize;
     private Path csvPath;
@@ -195,7 +195,6 @@ public class JayMTAnalyze extends GhidraScript {
         listing = currentProgram.getListing();
         functions = currentProgram.getFunctionManager();
         bookmarks = currentProgram.getBookmarkManager();
-        pseudo = new PseudoDisassembler(currentProgram);
         mainBlock = memory.getBlock(toAddr(BASE));
         if (mainBlock == null) {
             mainBlock = memory.getBlock(toAddr(0));
@@ -234,6 +233,7 @@ public class JayMTAnalyze extends GhidraScript {
         report.put("symbol_count", symbols.size());
         Map<String, Symbol> byName = new HashMap<>();
         for (Symbol symbol : symbols) byName.put(symbol.name, symbol);
+        timed("Decompiler availability", this::checkDecompiler);
         timed("Memory mapping", () -> mapRegions(byName));
         timed("Seed justified instruction modes", () -> seedModes(symbols));
         discoverFunctions(symbols);
@@ -246,6 +246,17 @@ public class JayMTAnalyze extends GhidraScript {
         report.put("status", status);
         info(String.format(Locale.ROOT, "%s: %d functions, %d pointers, %d unresolved, %d heuristic choices", status,
             functions.getFunctionCount(), pointerCount, unresolved.size(), heuristic.size()));
+    }
+
+    private void checkDecompiler() throws Exception {
+        DecompInterface decompiler = new DecompInterface();
+        try {
+            if (!decompiler.openProgram(currentProgram)) {
+                throw new IllegalArgumentException("Ghidra's native decompiler is unavailable: " +
+                    decompiler.getLastMessage() + "; see your Ghidra GettingStarted.md, Building Native Components");
+            }
+        }
+        finally { decompiler.dispose(); }
     }
 
     /** Space-delimited CSV with RFC-style doubled quotes; supports names containing spaces. */
@@ -379,24 +390,37 @@ public class JayMTAnalyze extends GhidraScript {
         if (hints.containsKey(start)) return hints.get(start);
         if (modeCache.containsKey(start)) return modeCache.get(start);
         Boolean result = null;
-        ProgramContext context = currentProgram.getProgramContext();
-        Register register = context.getRegister("ISA_MODE");
         for (boolean mode16 : new boolean[] {true, false}) {
             if (!mode16 && (start & 3) != 0) continue;
-            PseudoDisassemblerContext probe = new PseudoDisassemblerContext(context);
-            // Context writes during an active flow are delayed. Seed the address BEFORE flowStart.
-            probe.setValue(register, toAddr(start), mode16 ? BigInteger.ONE : BigInteger.ZERO);
-            probe.flowStart(toAddr(start));
-            PseudoInstruction instruction;
-            try { instruction = pseudo.disassemble(toAddr(start), probe, false); }
-            catch (InsufficientBytesException | UnknownContextException | UnknownInstructionException error) { instruction = null; }
+            PseudoInstruction instruction = probeInstruction(start, mode16);
             if (instruction != null) {
                 String mnemonic = instruction.getMnemonicString().toLowerCase(Locale.ROOT);
-                if (mnemonic.equals("save") || (!mode16 && mnemonic.equals("special2"))) { result = mode16; break; }
+                // Generic SPECIAL2 is not a prologue: two valid MIPS16 instructions
+                // can form that 32-bit opcode. Recognize an actual stack allocation.
+                long word = !mode16 ? dword(start) : 0;
+                boolean stack32 = !mode16 && (word & 0xffff0000L) == 0x27bd0000L && (short) word < 0;
+                if (mnemonic.equals("save") || stack32) { result = mode16; break; }
             }
         }
         modeCache.put(start, result);
         return result;
+    }
+
+    private PseudoInstruction probeInstruction(long start, boolean mode16) throws Exception {
+        ProgramContext context = currentProgram.getProgramContext();
+        Register register = context.getRegister("ISA_MODE");
+        Address address = toAddr(start);
+        PseudoDisassemblerContext probe = new PseudoDisassemblerContext(context);
+        // Parse against private context directly: Ghidra 12's PseudoDisassembler
+        // starts a new flow internally and can discard an already-active override.
+        probe.setValue(register, address, mode16 ? BigInteger.ONE : BigInteger.ZERO);
+        probe.flowStart(address);
+        MemBuffer buffer = new DumbMemBufferImpl(memory, address);
+        try {
+            InstructionPrototype prototype = currentProgram.getLanguage().parse(buffer, probe, false);
+            return prototype == null ? null : new PseudoInstruction(currentProgram, address, prototype, buffer, probe);
+        }
+        catch (InsufficientBytesException | UnknownInstructionException error) { return null; }
     }
 
     private void seedModes(List<Symbol> symbols) throws Exception {
@@ -442,7 +466,9 @@ public class JayMTAnalyze extends GhidraScript {
         }
         if (listing.getInstructionAt(toAddr(symbol.start)) == null) return false;
         // Debug extents may include literal pools. Preserve Ghidra's flow-derived body.
-        Function created = createFunction(toAddr(symbol.start), name);
+        CreateFunctionCmd command = new CreateFunctionCmd(name, toAddr(symbol.start), null, SourceType.IMPORTED);
+        if (!command.applyTo(currentProgram, monitor)) return false;
+        Function created = functions.getFunctionAt(toAddr(symbol.start));
         if (created != null) {
             // Auto-detected thunks may inherit a DEFAULT symbol from their target.
             // setSource cannot cross DEFAULT; assigning the name/source together can.
@@ -454,7 +480,9 @@ public class JayMTAnalyze extends GhidraScript {
 
     private boolean hasDataReference(long address) {
         for (Reference reference : currentProgram.getReferenceManager().getReferencesTo(toAddr(address))) {
-            if (reference.getReferenceType().isData()) return true;
+            // Ghidra's synthetic external entry-point references also report isData().
+            // Only an actual memory reference carries evidence of a pointer's ISA tag.
+            if (reference.getReferenceType().isData() && reference.getFromAddress().isMemoryAddress()) return true;
         }
         return false;
     }
@@ -464,6 +492,12 @@ public class JayMTAnalyze extends GhidraScript {
         monitor.checkCancelled();
         if (!mapped(start, end)) return false;
         Boolean mode = detectMode(start);
+        // Tagged pointer references can correct an automatically decoded entry too.
+        // Inspect them before accepting an existing instruction/function as resolved.
+        if (mode == null && stage > 0) {
+            boolean refs32 = hasDataReference(start), refs16 = hasDataReference(start + 1);
+            if (refs32 != refs16) mode = refs16;
+        }
         Instruction instruction = listing.getInstructionAt(toAddr(start));
         if (instruction != null && mode != null) {
             BigInteger actual = currentProgram.getProgramContext().getValue(currentProgram.getRegister("ISA_MODE"), toAddr(start), false);
@@ -492,13 +526,6 @@ public class JayMTAnalyze extends GhidraScript {
             return function(symbol);
         }
         if (stage == 0) return false;
-        // Low-bit mode inference applies to pointer DATA references, never direct call targets.
-        boolean refs32 = hasDataReference(start), refs16 = hasDataReference(start + 1);
-        if (refs32 != refs16) {
-            addEntryPoint(toAddr(start));
-            disassemble(start, null, refs16);
-            return function(symbol);
-        }
         if (stage != 2 || !listing.isUndefined(toAddr(start), toAddr(end - 1))) return false;
         for (boolean mode16 : new boolean[] {true, false}) {
             if (!mode16 && (start & 3) != 0) continue;

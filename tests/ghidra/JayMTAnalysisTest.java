@@ -159,6 +159,19 @@ public class JayMTAnalysisTest extends GhidraScript {
         }
     }
 
+    private void ambiguousModeRegression() throws Exception {
+        GhidraScript parser = newParser();
+        parser.set(getState(), monitor, new PrintWriter(System.out));
+        Method initialize = analyzerClass.getDeclaredMethod("initialize");
+        initialize.setAccessible(true);
+        initialize.invoke(parser);
+        Method detect = analyzerClass.getDeclaredMethod("detectMode", long.class);
+        detect.setAccessible(true);
+        if (detect.invoke(parser, 0x90000090L) != null) {
+            throw new AssertionError("Generic SPECIAL2 must not force a MIPS32 mode on a MIPS16 leaf");
+        }
+    }
+
     private void function(long offset, String name) {
         Address address = toAddr(offset);
         Function function = currentProgram.getFunctionManager().getFunctionAt(address);
@@ -172,10 +185,11 @@ public class JayMTAnalysisTest extends GhidraScript {
 
     @Override
     protected void run() throws Exception {
-        ResourceFile source = GhidraScriptUtil.findScriptByName("JayMTAnalyze.java");
-        if (source == null) throw new AssertionError("Native analyzer script missing from script path");
+        ResourceFile source = new ResourceFile(getSourceFile().getParentFile().getParentFile().getParentFile(), "ghidra_scripts/JayMTAnalyze.java");
+        if (!source.isFile()) throw new AssertionError("Native analyzer script missing from checkout");
         analyzerClass = GhidraScriptUtil.getProvider(source).getScriptInstance(source, new PrintWriter(System.out)).getClass();
         logicRegressions();
+        ambiguousModeRegression();
         function(0x90000000L, "return_test");
         function(0x90000010L, "compact_test");
         function(0x90000040L, "unhinted_test");
@@ -183,6 +197,12 @@ public class JayMTAnalysisTest extends GhidraScript {
         function(0x90000060L, SymbolUtilities.replaceInvalidChars("quoted function", true));
         function(0x90000070L, SymbolUtilities.replaceInvalidChars("quote\"function", true));
         function(0x90000080L, "thunk_test");
+        function(0x90000090L, "ambiguous_leaf");
+        if (!BigInteger.ONE.equals(currentProgram.getProgramContext().getValue(
+                currentProgram.getRegister("ISA_MODE"), toAddr(0x90000090L), false)) ||
+                !getInstructionAt(toAddr(0x90000090L)).getMnemonicString().equals("lbu")) {
+            throw new AssertionError("Ambiguous leaf must use the mode from its tagged data reference");
+        }
         Function thunk = currentProgram.getFunctionManager().getFunctionAt(toAddr(0x90000080L));
         if (!thunk.isThunk() || thunk.getSymbol().getSource() != SourceType.IMPORTED ||
                 !thunk.getThunkedFunction(false).getEntryPoint().equals(toAddr(0x90000000L))) {
@@ -212,7 +232,7 @@ public class JayMTAnalysisTest extends GhidraScript {
         if (getInstructionAt(toAddr(0x90000004L)) == null) {
             throw new AssertionError("MIPS32 return delay slot missing");
         }
-        for (long pointer : new long[] {0x90000030L, 0x90000034L, 0x90000038L}) {
+        for (long pointer : new long[] {0x90000030L, 0x90000034L, 0x90000038L, 0x9000003cL}) {
             if (getDataAt(toAddr(pointer)) == null || !getDataAt(toAddr(pointer)).isPointer()) {
                 throw new AssertionError("Function pointer missing at " + toAddr(pointer));
             }
