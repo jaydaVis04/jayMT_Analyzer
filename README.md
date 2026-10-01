@@ -107,6 +107,12 @@ The headless command performs these steps automatically. Its success check requi
 
 The old `analyze_mtk_image.py` name remains only as a small compatibility wrapper. It explicitly declares `# @runtime Jython` and delegates to the same Java analyzer. Use the Java entry point to avoid Jython entirely.
 
+### Print the memory layout
+
+For an existing analyzed project, open `md1rom`, then **Window → Script Manager**. Add this repository's `ghidra_scripts` directory using the script directory manager if needed. Run **`JayMTMemoryLayout.java`** in the **jayMT_Analyzer** category. It prints every mapped region's name, start and inclusive end addresses, size in bytes, read/write/execute permissions, and initialization state to the console, then offers to save a text file. It reads the existing program without rerunning analysis or changing it.
+
+This is the reconstructed Ghidra memory map, not the container's section/file-offset layout (`manifest.json`) or a complete hardware map. Initialized regions may contain synthesized zero-fill. In headless mode the script accepts an optional output text-file path.
+
 ## Analysis and processor support
 
 The pipeline relocates the raw ROM to `0x90000000`, reads exported symbols, reconstructs recognized initialization tables, then discovers functions using prologues, automatic analysis, pointer references, and finally optional mode guesses. It creates function pointers, completes recognized delay slots, and removes only obsolete instruction-error bookmarks. Missing mappings and unresolved modes remain visible in the report.
