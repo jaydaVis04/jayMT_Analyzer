@@ -49,6 +49,7 @@ public class JayMTAnalyze extends GhidraScript {
     private long pointerCount;
     private long aliasLabelsCreated;
     private long unresolvedLabelsCreated;
+    private long namedFunctionCount;
     private final Map<Long, Boolean> hints = new HashMap<>();
     private final Map<Long, Boolean> modeCache = new HashMap<>();
     private final Set<Long> modeConflicts = new HashSet<>();
@@ -130,7 +131,7 @@ public class JayMTAnalyze extends GhidraScript {
             report.put("elapsed_seconds", seconds(start));
             report.put("pointer_count", pointerCount);
             report.put("pointers_created", pointersCreated);
-            report.put("named_function_count", importedFunctions.size());
+            report.put("named_function_count", namedFunctionCount);
             report.put("alias_labels_created", aliasLabelsCreated);
             report.put("unresolved_labels_created", unresolvedLabelsCreated);
             if (reportPath != null) {
@@ -240,6 +241,7 @@ public class JayMTAnalyze extends GhidraScript {
         timed("Function pointers", this::createPointers);
         timed("Delay-slot completion", this::cleanupDelaySlots);
         timed("Final incremental analysis", () -> analyzeChanges(currentProgram));
+        reconcileSymbols(symbols);
         cleanupBookmarks();
         report.put("function_count", functions.getFunctionCount());
         String status = warnings.isEmpty() && unresolved.isEmpty() && heuristic.isEmpty() ? "completed" : "completed_with_warnings";
@@ -257,6 +259,30 @@ public class JayMTAnalyze extends GhidraScript {
             }
         }
         finally { decompiler.dispose(); }
+    }
+
+    private void reconcileSymbols(List<Symbol> symbols) throws Exception {
+        Set<Long> named = new HashSet<>(), removed = new HashSet<>();
+        for (Symbol symbol : symbols) {
+            monitor.checkCancelled();
+            if (!importedFunctions.contains(symbol.start)) continue;
+            String name = SymbolUtilities.replaceInvalidChars(symbol.name, true);
+            Function function = functions.getFunctionAt(toAddr(symbol.start));
+            if (function != null) {
+                if (function.getName().equals(name)) named.add(symbol.start);
+            }
+            else {
+                // Automatic analyzers can fold provisional entries into other bodies
+                // or data. Count the saved state and retain every imported name.
+                if (label(symbol.start, name)) unresolvedLabelsCreated++;
+                removed.add(symbol.start);
+                unresolved.add(record("name", symbol.name, "address", symbol.start,
+                    "reason", "function removed by automatic analysis; label retained"));
+            }
+        }
+        namedFunctionCount = named.size();
+        report.put("functions_removed_by_automatic_analysis", removed.size());
+        if (!removed.isEmpty()) warn(removed.size() + " provisional function entries were removed by automatic analysis; labels retained");
     }
 
     /** Space-delimited CSV with RFC-style doubled quotes; supports names containing spaces. */
